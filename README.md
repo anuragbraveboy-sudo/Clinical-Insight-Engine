@@ -270,7 +270,7 @@ py -c "from analyze import create_synthetic_data; create_synthetic_data()"
 ```bash
 npm run dev
 ```
-The Express server runs both the API and Vite-powered React app. It defaults to `http://localhost:5000` unless `PORT` is set in `.env`; use `PORT=3000` if you want the local URL to match `NEXT_PUBLIC_APP_URL=http://localhost:3000`.
+The Express server runs both the API and Vite-powered React app. It listens on `PORT` or `5000` by default and binds to `0.0.0.0` so the app is reachable in local containers and hosted environments. Use `PORT=3000` if you want the local URL to match `NEXT_PUBLIC_APP_URL=http://localhost:3000`, or explicitly pass `HOST=127.0.0.1 npm run dev` if you prefer a local-only listener.
 
 #### ML Pipeline (Training)
 ```bash
