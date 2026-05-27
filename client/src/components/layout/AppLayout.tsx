@@ -28,16 +28,6 @@ export function AppLayout({ children }: AppLayoutProps) {
       .finally(() => setChecking(false));
   }, [setLocation]);
 
-  if (checking) {
-    return (
-      <div className="flex min-h-screen items-center justify-center bg-[#F8FAFC]">
-        <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-      </div>
-    );
-  }
-
-  if (!user) return null;
-
   const navItems = [
     { href: "/dashboard", label: "New Assessment", icon: Activity },
     { href: "/history", label: "Patient History", icon: ClipboardList },
