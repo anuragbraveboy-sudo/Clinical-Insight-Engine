@@ -54,7 +54,7 @@ const assessmentLimiter = rateLimit({
   },
 });
 
-function getPythonExecutable() {
+export function getPythonExecutable() {
   const candidates = process.platform === "win32"
     ? [
         path.resolve(".venv", "Scripts", "python.exe"),
