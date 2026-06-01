@@ -565,7 +565,7 @@ export async function registerRoutes(
           console.warn("Python prediction preview failed, running clinical rule-based fallback:", error);
           prediction = calculateClinicalFallback(input);
         }
-
+        console.log(`[AUDIT] preview requested by=${req.session.user?.email} riskCategory=${prediction.riskCategory} riskScore=${prediction.riskScore} at=${new Date().toISOString()}`);
         return res.json({
           riskScore: prediction.riskScore,
           riskCategory: prediction.riskCategory,
@@ -674,7 +674,7 @@ export async function registerRoutes(
               : Number(prediction.modelConfidence),
           createdBy: userId
         });
-
+        console.log(`[AUDIT] prediction created by=${userId} riskCategory=${prediction.riskCategory} riskScore=${prediction.riskScore} at=${new Date().toISOString()}`);
         return res.status(201).json({
           ...assessment,
           prediction
