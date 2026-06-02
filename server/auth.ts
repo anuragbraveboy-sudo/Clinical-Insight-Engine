@@ -28,6 +28,27 @@ interface RegisteredUser {
 
 // removed duplicated functions
 
+const SALT_LENGTH = 32;
+const KEY_LENGTH = 64;
+
+function hashPassword(password: string): string {
+  const salt = randomBytes(SALT_LENGTH).toString("hex");
+  const hash = scryptSync(password, salt, KEY_LENGTH).toString("hex");
+  return `${salt}:${hash}`;
+}
+
+function verifyPassword(password: string, stored: string): boolean {
+  const [salt, key] = stored.split(":");
+  if (!salt || !key) return false;
+  const hash = scryptSync(password, salt, KEY_LENGTH);
+  const keyBuffer = Buffer.from(key, "hex");
+  return hash.length === keyBuffer.length && timingSafeEqual(hash, keyBuffer);
+}
+
+function ipKeyGenerator(ip: string): string {
+  return ip.replace(/[^a-zA-Z0-9.:]/g, "_");
+}
+
 /**
  * In-memory store for registered users.
  * In production, this should be replaced with a persistent database.
@@ -267,8 +288,8 @@ export function createAuthRouter(): Router {
 
       return res.status(201).json({ success: true, pendingEmail: email, ...(process.env.NODE_ENV !== "production" && { devOtp: otp }) });
     } catch (err) {
-      console.error("Registration failed:", err);
-      return res.status(500).json({ message: "Failed to register account." });
+      console.error("Registration error:", err);
+      return res.status(500).json({ message: "Registration failed due to a server error." });
     }
   });
 
@@ -296,11 +317,11 @@ export function createAuthRouter(): Router {
       // Check in-memory store (legacy)
       const registeredUser = registeredUsers.get(email);
       if (registeredUser && verifyPassword(password, registeredUser.passwordHash)) {
-        userFullName = registeredUser.fullName;
+        userName = registeredUser.fullName;
       }
 
       // Also check DB
-      if (!userFullName) {
+      if (!userName) {
         try {
           const db = getDb();
           const [dbUser] = await db
@@ -310,7 +331,14 @@ export function createAuthRouter(): Router {
             .limit(1);
 
           if (dbUser && verifyPassword(password, dbUser.passwordHash)) {
-            userFullName = dbUser.fullName;
+            userName = dbUser.fullName;
+          }
+        } catch (_err) {
+          // DB not available — fall back to in-memory only
+          console.warn("DB unavailable for login, using in-memory only.");
+          const registeredUser = registeredUsers.get(email);
+          if (registeredUser && verifyPassword(password, registeredUser.passwordHash)) {
+            userName = registeredUser.fullName;
           }
         } catch (_err) {
           // DB not available — fall back to in-memory only
@@ -324,7 +352,7 @@ export function createAuthRouter(): Router {
     }
 
 
-    if (!userFullName) {
+    if (!userName) {
       return res.status(401).json({ message: "Invalid email or password." });
     }
 
