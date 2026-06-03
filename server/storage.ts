@@ -13,7 +13,7 @@ import {
 import type { RiskCategory } from "./validation/searchValidation";
 
 export interface IStorage {
-  getAssessments(limit?: number, offset?: number, createdBy?: string): Promise<Assessment[]>;
+  getAssessments(limit?: number, offset?: number, createdBy?: string): Promise<{ data: Assessment[]; total: number; page: number; totalPages: number }>;
   /**
    * Searches assessments by risk category label using parameterized queries.
    * Uses Drizzle ORM eq() — user input is NEVER interpolated into SQL strings.
@@ -47,10 +47,10 @@ export type AssessmentCreateInput = InsertAssessment & {
 
 export class DatabaseStorage implements IStorage {
   async getAssessments(
-    limit: number = 50,
+    limit: number = 20,
     offset: number = 0,
     createdBy?: string
-  ): Promise<Assessment[]> {
+  ): Promise<{ data: Assessment[]; total: number; page: number; totalPages: number }> {
     const db = getDb();
 
     const filters: any[] = [];
@@ -107,11 +107,19 @@ export class DatabaseStorage implements IStorage {
 
 
 
-    if (filters.length > 0) {
-      return await query.where(and(...filters)).limit(limit).offset(offset);
-    }
+    const db2 = getDb();
+    const countResult = await db2.select({ count: sql<number>`count(*)` }).from(assessments);
+    const total = Number(countResult[0].count);
+    const page = Math.floor(offset / limit) + 1;
+    const totalPages = Math.ceil(total / limit);
 
-    return await query.limit(limit).offset(offset);
+    let data: Assessment[];
+    if (filters.length > 0) {
+      data = await query.where(and(...filters)).limit(limit).offset(offset);
+    } else {
+      data = await query.limit(limit).offset(offset);
+    }
+    return { data, total, page, totalPages };
   }
 
   /**
