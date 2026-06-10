@@ -1,4 +1,7 @@
-import { loginAuditLogs, type Assessment, type InsertAssessment, type AssessmentFactor, type User, type InsertUser, type ModelVersion, type InsertModelVersion, type InsertPatientUser } from "@shared/schema";
+import { loginAuditLogs, type Assessment, type InsertAssessment, type AssessmentFactor, type User, type InsertUser, type ModelVersion, type InsertModelVersion, type InsertPatientUser, type PatientUser } from "@shared/schema";
+import { assessments, users } from "@shared/schema";
+import { getDb } from "./db";
+import { eq, desc, and, or, ilike } from "drizzle-orm";
 import type { RiskCategory } from "./validation/searchValidation";
 
 import { UserRepository } from "./repositories/user.repository";
@@ -59,6 +62,12 @@ export interface IStorage {
   getLatestModelVersion(): Promise<ModelVersion | undefined>;
   createModelVersion(data: InsertModelVersion): Promise<ModelVersion>;
   getModelDatasetStats(): Promise<{ classBalance: Record<string, number>; featureStats: Record<string, { mean: number; std: number }>; totalSamples: number } | null>;
+  getPatientUserByEmail(email: string): Promise<PatientUser | undefined>;
+  getPatientUserByPatientName(patientName: string): Promise<PatientUser | undefined>;
+  getPatientUserById(id: string): Promise<PatientUser | undefined>;
+  createPatientUser(data: InsertPatientUser): Promise<PatientUser>;
+  getAssessmentsByPatientName(patientName: string, limit?: number, offset?: number): Promise<{ data: Assessment[]; total: number }>;
+  getPatientTrends(patientName: string): Promise<{ date: string; riskScore: number; riskCategory: string }[]>;
 }
 
 export type AssessmentCreateInput = InsertAssessment & {
@@ -71,193 +80,142 @@ export type AssessmentCreateInput = InsertAssessment & {
 };
 
 export class DatabaseStorage implements IStorage {
+  private assessmentRepo = new AssessmentRepository();
+  private userRepo = new UserRepository();
+  private auditRepo = new AuditRepository();
+  private analyticsRepo = new AnalyticsRepository();
+  private modelVersionRepo = new ModelVersionRepository();
+  private patientUserRepo = new PatientUserRepository();
+
   async getAssessments(
-    limit: number = 50,
-    offset: number = 0,
+    limitOrParams?: number | {
+      limit?: number;
+      page?: number;
+      cursor?: number;
+      createdBy?: string;
+      sortBy?: string;
+      order?: "asc" | "desc";
+      searchTerm?: string;
+      riskCategory?: string;
+      gender?: string;
+      minAge?: number;
+      maxAge?: number;
+      startDate?: string;
+      endDate?: string;
+    },
+    cursor?: number,
     createdBy?: string
-  ): Promise<Assessment[]> {
-    const db = getDb();
-
-    const filters: any[] = [];
-
-    // Filter by createdBy when provided to ensure users only see their own assessments
-    if (createdBy) {
-      const createdByCol = (assessments as any).createdBy ?? (assessments as any).created_by;
-      if (createdByCol) {
-        filters.push(eq(createdByCol, createdBy));
-      }
-    }
-
-
-
-
-    // Avoid selecting non-existent columns (e.g., created_by in older DB states)
-    // by explicitly selecting only columns known to exist in migrations.
-    const query = db
-      .select({
-        id: assessments.id,
-        patientName: assessments.patientName,
-        gender: assessments.gender,
-        age: assessments.age,
-        hypertension: assessments.hypertension,
-        heartDisease: (assessments as any).heartDisease ?? (assessments as any).heart_disease,
-        smokingHistory:
-          (assessments as any).smokingHistory ?? (assessments as any).smoking_history,
-        bmi: assessments.bmi,
-        hba1cLevel:
-          (assessments as any).hba1cLevel ?? (assessments as any).hba1c_level,
-        bloodGlucoseLevel:
-          (assessments as any).bloodGlucoseLevel ?? (assessments as any).blood_glucose_level,
-        riskScore:
-          (assessments as any).riskScore ?? (assessments as any).risk_score,
-        riskCategory:
-          (assessments as any).riskCategory ?? (assessments as any).risk_category,
-        factors: assessments.factors,
-        confidenceInterval:
-          (assessments as any).confidenceInterval ?? (assessments as any).confidence_interval,
-        modelConfidence:
-          (assessments as any).modelConfidence ?? (assessments as any).model_confidence,
-        createdBy:
-          (assessments as any).createdBy ?? (assessments as any).created_by,
-        createdAt:
-          (assessments as any).createdAt ?? (assessments as any).created_at,
-        userId:
-          (assessments as any).userId ?? (assessments as any).user_id,
-      })
-      .from(assessments)
-      .orderBy(desc((assessments as any).createdAt ?? (assessments as any).created_at))
-      .$dynamic();
-
-
-
-
-
-    if (filters.length > 0) {
-      return await query.where(and(...filters)).limit(limit).offset(offset);
-    }
-
-    return await query.limit(limit).offset(offset);
+  ): Promise<{
+    data: Assessment[];
+    total: number;
+    page: number;
+    limit: number;
+    totalPages: number;
+    nextCursor: number | null;
+  }> {
+    return this.assessmentRepo.getAssessments(limitOrParams, cursor, createdBy);
   }
 
-  /**
-   * Searches assessments by risk category label.
-   *
-   * Security: all conditions use Drizzle ORM parameterized helpers (ilike / eq).
-   * User-supplied `searchTerm` is passed as a bound parameter — never concatenated
-   * into a raw SQL string.  This is the primary defence against SQL injection.
-   *
-   * @param searchTerm   Free-text search term (validated upstream by searchValidation.ts)
-   * @param createdBy    Restrict results to this user's own records
-   * @param riskCategory Optional filter: LOW | MODERATE | HIGH
-   * @param limit        Maximum rows to return (default 20)
-   * @param offset       Pagination offset (default 0)
-   */
   async searchAssessments(
     searchTerm: string,
     createdBy?: string,
     riskCategory?: RiskCategory,
     limit: number = 20,
-    offset: number = 0
-  ): Promise<Assessment[]> {
-    const db = getDb();
-
-    // Build an array of WHERE conditions — all parameterized by Drizzle ORM.
-    // ilike() maps to: WHERE column ILIKE $1   (PostgreSQL bound parameter)
-    // eq()    maps to: WHERE column = $1
-    const conditions: ReturnType<typeof eq>[] = [];
-
-    // Always scope results to the requesting user when available
-    if (createdBy) {
-      conditions.push(eq(assessments.createdBy, createdBy));
-    }
-
-    // Risk category exact-match filter (parameterized)
-    if (riskCategory) {
-      conditions.push(eq(assessments.riskCategory, riskCategory));
-    }
-
-    // Free-text search across gender and smokingHistory fields
-    // ilike() uses PostgreSQL's case-insensitive LIKE with bound parameters:
-    //   WHERE (gender ILIKE $N OR smoking_history ILIKE $N)
-    // The `searchTerm` value is NEVER interpolated — Drizzle sends it as a placeholder.
-    if (searchTerm && searchTerm.trim() !== "") {
-      const pattern = `%${searchTerm.trim()}%`;
-        conditions.push(
-          or(
-            ilike(assessments.patientName, pattern),   // ← ADD THIS LINE
-            ilike(assessments.gender, pattern),
-            ilike(assessments.smokingHistory, pattern),
-            ilike(assessments.riskCategory, pattern)
-          ) as ReturnType<typeof eq>
-        );
-    }
-
-    let query = db
-      .select()
-      .from(assessments)
-      .orderBy(desc(assessments.createdAt))
-      .$dynamic();
-
-    if (conditions.length > 0) {
-      query = query.where(and(...conditions));
-    }
-
-    return await query.limit(limit).offset(offset);
+    cursor?: number
+  ): Promise<{ data: Assessment[]; nextCursor: number | null }> {
+    return this.assessmentRepo.searchAssessments(searchTerm, createdBy, riskCategory, limit, cursor);
   }
 
-  /**
-   * Retrieves a single assessment by its numeric primary key.
-   * NOTE: This function no longer implicitly scopes by `createdBy`.
-   * Object-Level Authorization must be explicitly checked by the caller using `canAccessPatientRecord`.
-   *
-   * Security: uses Drizzle ORM eq() — parameterized, not string-concatenated.
-   */
-  async getAssessmentById(
-    id: number
-  ): Promise<Assessment | undefined> {
-    const db = getDb();
-
-    const conditions: ReturnType<typeof eq>[] = [eq(assessments.id, id)];
-
-    const [result] = await db
-      .select()
-      .from(assessments)
-      .where(and(...conditions))
-      .limit(1);
-
-    return result;
+  async getAssessmentById(id: number): Promise<Assessment | undefined> {
+    return this.assessmentRepo.getAssessmentById(id);
   }
 
-  async createAssessment(
-    assessment: AssessmentCreateInput
-  ): Promise<Assessment> {
+  async createAssessment(assessment: AssessmentCreateInput): Promise<Assessment> {
+    return this.assessmentRepo.createAssessment(assessment);
+  }
 
-    const db = getDb();
+  async deleteAssessment(id: number): Promise<void> {
+    return this.assessmentRepo.deleteAssessment(id);
+  }
 
-    const [created] = await db
-      .insert(assessments)
-      .values(assessment as any)
-      .returning();
-
-    return created;
+  async autocompletePatientNames(query: string, createdBy?: string, limit?: number): Promise<string[]> {
+    return this.assessmentRepo.autocompletePatientNames(query, createdBy, limit);
   }
 
   async createUser(data: InsertUser): Promise<User> {
-    const db = getDb();
-    const [user] = await db.insert(users).values(data).returning();
-    return user;
+    return this.userRepo.createUser(data);
   }
 
   async getUserByEmail(email: string): Promise<User | undefined> {
-    const db = getDb();
-    const [user] = await db.select().from(users).where(eq(users.email, email));
-    return user;
+    return this.userRepo.getUserByEmail(email);
   }
 
   async getUserById(id: string): Promise<User | undefined> {
-    const db = getDb();
-    const [user] = await db.select().from(users).where(eq(users.id, id));
-    return user;
+    return this.userRepo.getUserById(id);
+  }
+
+  async getAllUsers(page: number, limit: number): Promise<{ data: User[]; total: number }> {
+    return this.userRepo.getAllUsers(page, limit);
+  }
+
+  async updateUser(id: string, data: Partial<Pick<User, "isActive" | "role">>): Promise<User> {
+    return this.userRepo.updateUser(id, data);
+  }
+
+  async getLoginAuditLogs(page: number, limit: number): Promise<{ data: typeof loginAuditLogs.$inferSelect[]; total: number }> {
+    return this.auditRepo.getLoginAuditLogs(page, limit);
+  }
+
+  async recordLoginAudit(params: { userId?: string; ipAddress?: string; userAgent?: string; loginStatus: string; }): Promise<void> {
+    return this.auditRepo.recordLoginAudit(params);
+  }
+
+  async getSystemStats(): Promise<{ totalUsers: number; totalAssessments: number; riskDistribution: { category: string; count: number }[]; }> {
+    return this.analyticsRepo.getSystemStats();
+  }
+
+  async getAnalyticsStats(createdBy?: string): Promise<any> {
+    return this.analyticsRepo.getAnalyticsStats(createdBy);
+  }
+
+  async getModelVersions(): Promise<ModelVersion[]> {
+    return this.modelVersionRepo.findAll();
+  }
+
+  async getLatestModelVersion(): Promise<ModelVersion | undefined> {
+    return this.modelVersionRepo.findLatest();
+  }
+
+  async createModelVersion(data: InsertModelVersion): Promise<ModelVersion> {
+    return this.modelVersionRepo.create(data);
+  }
+
+  async getModelDatasetStats(): Promise<{ classBalance: Record<string, number>; featureStats: Record<string, { mean: number; std: number }>; totalSamples: number } | null> {
+    return this.modelVersionRepo.getDatasetStats();
+  }
+
+  async getPatientUserByEmail(email: string): Promise<PatientUser | undefined> {
+    return this.patientUserRepo.findByEmail(email);
+  }
+
+  async getPatientUserByPatientName(patientName: string): Promise<PatientUser | undefined> {
+    return this.patientUserRepo.findByPatientName(patientName);
+  }
+
+  async getPatientUserById(id: string): Promise<PatientUser | undefined> {
+    return this.patientUserRepo.findById(id);
+  }
+
+  async createPatientUser(data: InsertPatientUser): Promise<PatientUser> {
+    return this.patientUserRepo.create(data);
+  }
+
+  async getAssessmentsByPatientName(patientName: string, limit: number = 20, offset: number = 0): Promise<{ data: Assessment[]; total: number }> {
+    return this.assessmentRepo.getAssessmentsByPatientName(patientName, limit, offset);
+  }
+
+  async getPatientTrends(patientName: string): Promise<{ date: string; riskScore: number; riskCategory: string }[]> {
+    return this.assessmentRepo.getPatientTrends(patientName);
   }
 }
 
