@@ -311,7 +311,8 @@ export async function registerRoutes(
     requireVerified,
     async (req, res) => {
       const userId = (req.session.user as any)?.id;
-      if (!userId) {
+      const userEmail = req.session.user?.email;
+      if (!userId || !userEmail) {
         return res.status(401).json({ message: "Authentication required." });
       }
 
@@ -357,7 +358,7 @@ export async function registerRoutes(
               factors: prediction.factors,
               confidenceInterval: prediction.confidenceInterval ?? null,
               modelConfidence: prediction.modelConfidence == null ? undefined : Number(prediction.modelConfidence),
-              createdBy: userId,
+              createdBy: userEmail,
             });
           })
         );
