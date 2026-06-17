@@ -55,6 +55,10 @@ uploadRouter.post(
       try {
         const csvString = file.buffer.toString("utf-8");
         const parsed = Papa.parse(csvString, { header: true, skipEmptyLines: true });
+
+        if (parsed.data.length > 100) {
+          return res.status(400).json({ message: "CSV exceeds maximum limit of 100 rows." });
+        }
         
         let processed = 0;
         let created = 0;
