@@ -19,7 +19,8 @@ mlRouter.post(
   validateDTO(z.object({ assessments: z.array(api.assessments.create.input) })),
   async (req, res) => {
     const userId = (req.session.user as any)?.id;
-    if (!userId) {
+    const userEmail = req.session.user?.email;
+    if (!userId || !userEmail) {
       return res.status(401).json({ message: "Authentication required." });
     }
 
@@ -69,7 +70,7 @@ mlRouter.post(
             factors: prediction.factors,
             confidenceInterval: prediction.confidenceInterval ?? null,
             modelConfidence: prediction.modelConfidence == null ? undefined : Number(prediction.modelConfidence),
-            createdBy: userId,
+            createdBy: userEmail,
           });
         })
       );
