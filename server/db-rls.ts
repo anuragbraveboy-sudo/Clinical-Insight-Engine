@@ -1,8 +1,7 @@
-import { AsyncLocalStorage } from "async_hooks";
 import { drizzle, type NodePgDatabase } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import * as schema from "@shared/schema";
-import { getPool } from "./db";
+import { getPool, dbRlsStorage } from "./db";
 
 export interface RlsUserContext {
   userId: string;
@@ -11,7 +10,7 @@ export interface RlsUserContext {
   patientName?: string;
 }
 
-const rlsStorage = new AsyncLocalStorage<NodePgDatabase<typeof schema>>();
+const rlsStorage = dbRlsStorage;
 
 export function getRlsDb(): NodePgDatabase<typeof schema> | undefined {
   return rlsStorage.getStore();
