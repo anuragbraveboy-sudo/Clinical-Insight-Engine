@@ -14,6 +14,7 @@ import ImportData from "./pages/ImportData";
 import AdminDashboard from "./pages/AdminDashboard";
 import ModelMonitoring from "./pages/ModelMonitoring";
 import ProgressTracking from "./pages/ProgressTracking";
+import CohortDiscovery from "./pages/CohortDiscovery";
 
 import LoginPage from "./pages/LoginPage";
 import ForgotPassword from "./pages/ForgotPassword";
@@ -59,17 +60,17 @@ function Router() {
           <ModelMonitoring />
         </ProtectedRoute>
       </Route>
-       <Route path="/progress">
-         <ProtectedRoute>
-           <ProgressTracking />
-         </ProtectedRoute>
-       </Route>
-       <Route path="/my-health">
-         <ProtectedRoute>
-           <MyHealth />
-         </ProtectedRoute>
-       </Route>
-       <Route path="/login" component={LoginPage} />
+      <Route path="/progress">
+        <ProtectedRoute>
+          <ProgressTracking />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/cohort-discovery">
+        <ProtectedRoute>
+          <CohortDiscovery />
+        </ProtectedRoute>
+      </Route>
+      <Route path="/login" component={LoginPage} />
       <Route path="/forgot-password" component={ForgotPassword} />
       <Route path="/reset-password" component={ResetPassword} />
       <Route path="/privacy-policy" component={PrivacyPolicy} />
