@@ -19,23 +19,7 @@ import { searchQuerySchema, assessmentsQuerySchema, cohortQuerySchema } from "..
 import { canAccessPatientRecord } from "../services/authz/patient-access";
 import { logAccessAttempt } from "../security/access-audit";
 import { validateDTO } from "../middleware/validateDTO";
-import { existsSync } from "fs";
-import { execFile } from "child_process";
-import { fileURLToPath } from "url";
-import path from "path";
-import os from "os";
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
-const analyzePyPath = path.resolve(__dirname, "..", "..", "analyze.py");
-
-function getPythonExecutable() {
-  const candidates =
-    process.platform === "win32"
-      ? [ path.resolve(".venv", "Scripts", "python.exe"), path.resolve("venv", "Scripts", "python.exe") ]
-      : [ path.resolve(".venv", "bin", "python"), path.resolve("venv", "bin", "python") ];
-  return candidates.find((candidate) => existsSync(candidate)) ?? (process.platform === "win32" ? "python" : "python3");
-}
+import { requireAssessmentAccess } from "../middleware/requireAssessmentAccess";
 
 const assessmentsRouter = Router();
 
@@ -545,39 +529,10 @@ assessmentsRouter.get(
   "/:id",
   requireAuth,
   requireVerified,
+  requireAssessmentAccess,
   async (req, res) => {
     try {
-      const id = parseInt(req.params.id as string, 10);
-
-      if (isNaN(id) || id <= 0) {
-        return res.status(400).json({ message: "Invalid assessment ID." });
-      }
-
-      const user = req.session.user;
-      if (!user) {
-        return res.status(401).json({ message: "Unauthorized" });
-      }
-
-      const assessment = await storage.getAssessmentById(id);
-
-      if (!assessment) {
-        return res.status(404).json({ message: "Assessment not found." });
-      }
-
-      if (!canAccessPatientRecord(user, assessment)) {
-        logAccessAttempt(
-          (user).id,
-          "Assessment",
-          id,
-          false,
-          "IDOR attempt: User not authorized to access this patient record"
-        );
-        return res.status(404).json({ message: "Assessment not found." });
-      }
-
-      logAccessAttempt((user).id, "Assessment", id, true, "Authorized access");
-      const recommendations = generateRecommendations({ ...assessment, riskCategory: assessment.riskCategory });
-      return res.json({ ...assessment, recommendations });
+      return res.json(req.assessment);
     } catch (err) {
       logger.error({ err }, "Assessment fetch error:");
       const { statusCode, message } = sanitizeDatabaseError(err);
@@ -590,39 +545,17 @@ assessmentsRouter.delete(
   "/:id",
   requireAuth,
   requireVerified,
+  requireAssessmentAccess,
   async (req, res) => {
     try {
-      const id = parseInt(req.params.id as string, 10);
-
-      if (isNaN(id) || id <= 0) {
-        return res.status(400).json({ message: "Invalid assessment ID." });
-      }
-
-      const user = req.session.user;
-      if (!user) {
-        return res.status(401).json({ message: "Unauthorized" });
-      }
-
-      const assessment = await storage.getAssessmentById(id);
-
-      if (!assessment) {
-        return res.status(404).json({ message: "Assessment not found." });
-      }
-
-      if (!canAccessPatientRecord(user, assessment)) {
-        logAccessAttempt(
-          (user).id,
-          "Assessment",
-          id,
-          false,
-          "IDOR attempt: User not authorized to delete this patient record"
-        );
-        return res.status(403).json({ message: "Forbidden" });
-      }
-
-      await storage.deleteAssessment(id);
-      
-      logAccessAttempt((user).id, "Assessment", id, true, "Assessment deleted successfully");
+      await storage.deleteAssessment(req.assessment.id);
+      logAccessAttempt(
+        (req.session.user as any)?.id,
+        "Assessment",
+        req.assessment.id,
+        true,
+        "Assessment deleted successfully"
+      );
       return res.status(204).send();
     } catch (err) {
       logger.error({ err }, "Assessment delete error:");

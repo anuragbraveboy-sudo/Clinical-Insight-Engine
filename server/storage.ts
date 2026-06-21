@@ -46,7 +46,7 @@ export interface IStorage {
     limit?: number,
     cursor?: number
   ): Promise<{ data: Assessment[]; nextCursor: number | null }>;
-  getAssessmentById(id: number): Promise<Assessment | undefined>;
+  getAssessmentById(id: number, createdBy?: string): Promise<Assessment | undefined>;
   createAssessment(assessment: any): Promise<Assessment>;
   deleteAssessment(id: number): Promise<void>;
   autocompletePatientNames(query: string, createdBy?: string, limit?: number): Promise<string[]>;
@@ -150,21 +150,9 @@ export class DatabaseStorage implements IStorage {
       createdBy: limitOrParams?.createdBy ?? createdBy,
     });
   }
-
-  async searchAssessments(
-    searchTerm: string,
-    createdBy?: string,
-    riskCategory?: RiskCategory,
-    limit?: number,
-    cursor?: number,
-  ) {
-    return this.assessmentRepository.searchAssessments(
-      searchTerm,
-      createdBy,
-      riskCategory,
-      limit,
-      cursor,
-    );
+  
+  async getAssessmentById(id: number, createdBy?: string) { 
+    return this.assessmentRepository.getAssessmentById(id, createdBy); 
   }
 
   async getAssessmentById(id: number) {
