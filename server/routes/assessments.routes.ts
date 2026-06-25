@@ -263,7 +263,7 @@ assessmentsRouter.post(
       // --- Redis unavailable: run synchronously using clinical fallback ---
       logger.warn("Redis unavailable — running assessment synchronously via clinical fallback");
 
-      const prediction = calculateClinicalFallback(input);
+      const prediction = calculateClinicalFallback(input) as PredictionResult;
 
       const assessment = await storage.createAssessment({
         patientName: input.patientName,
